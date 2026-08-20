@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StaticWebCatalog - Editor de Catálogo</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/improvements.css">
+    <link rel="stylesheet" href="styles/file-button-fix.css?v=2">
+    <link rel="stylesheet" href="styles/blue-theme.css?v=1">
+</head>
+<body>
+    <div class="background-overlay" id="background-overlay"></div>
+    
+    <div class="prototype-banner">
+        ⚠️ Este es un prototipo. Los datos se guardan solo en este navegador y son de prueba.
+    </div>
+
+    <header class="header">
+        <h1>Editor de Catálogo</h1>
+        <div class="product-count" id="product-count">0 de 10 productos</div>
+    </header>
+
+    <main class="main">
+        <div class="background-controls">
+            <label for="background-input">🖼️ Fondo de página:</label>
+            <input type="file" id="background-input" accept="image/*" class="input background-input">
+            <button id="remove-background" class="btn-remove-bg">Quitar fondo</button>
+        </div>
+
+        <section class="staging-section">
+            <h2>Agregar productos</h2>
+            
+            <!-- Input oculto y botón personalizado -->
+            <div class="file-input-container">
+                <input type="file" id="file-input" accept="image/*" multiple>
+                <button type="button" class="file-input-button" id="file-button">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                    </svg>
+                    Seleccionar imágenes de productos
+                </button>
+            </div>
+            
+            <div id="staging-area" style="margin-top: 16px;"></div>
+            <button id="add-button" class="btn btn-primary" disabled>Agregar al catálogo</button>
+        </section>
+
+        <section class="catalog-section">
+            <h2>Catálogo</h2>
+            <div id="catalog-grid" class="catalog-grid"></div>
+            <div id="empty-state" class="empty-state">
+                <p>No hay productos en el catálogo</p>
+                <p><small>Selecciona imágenes arriba para comenzar</small></p>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>

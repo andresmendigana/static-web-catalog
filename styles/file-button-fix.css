@@ -1,0 +1,79 @@
+/* Forzar estilo del botón de archivos - versión mejorada */
+
+/* Ocultar completamente el input nativo */
+#file-input {
+    position: absolute !important;
+    left: -9999px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+}
+
+/* Botón personalizado que reemplaza al input */
+.file-input-button {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    background-color: #4A8C5C !important; /* Verde igual al botón Agregar */
+    color: white !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 8px 16px !important;
+    cursor: pointer !important;
+    font-size: 14px !important;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    font-weight: 500 !important;
+    transition: background-color 0.2s ease !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.file-input-button:hover {
+    background-color: #3a7a4f !important;
+    transform: none !important;
+}
+
+.file-input-button:focus {
+    outline: 2px solid rgba(74, 140, 92, 0.3) !important;
+    outline-offset: 2px !important;
+}
+
+.file-input-button:active {
+    background-color: #2d5f3c !important;
+}
+
+/* Icono dentro del botón */
+.file-input-button svg {
+    width: 16px !important;
+    height: 16px !important;
+    fill: currentColor !important;
+}
+
+/* Contenedor del botón */
+.file-input-container {
+    position: relative !important;
+    display: inline-block !important;
+    margin-bottom: 16px !important;
+}
+
+/* Asegurar que no se vea el input nativo en ningún navegador */
+input[type="file"]::-webkit-file-upload-button {
+    display: none !important;
+}
+
+input[type="file"]::file-selector-button {
+    display: none !important;
+}
+
+/* Mejora adicional: hacer que el área de texto sea más clara */
+.staging-section {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-radius: 8px !important;
+    padding: 24px !important;
+    margin-bottom: 32px !important;
+    backdrop-filter: blur(10px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
