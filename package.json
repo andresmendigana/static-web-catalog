@@ -1,0 +1,36 @@
+{
+  "name": "static-web-catalog",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Stage 2 static catalog authoring and publication tooling",
+  "type": "module",
+  "engines": {
+    "node": "22.14.0",
+    "npm": "10.9.2"
+  },
+  "packageManager": "npm@10.9.2",
+  "scripts": {
+    "validate": "node scripts/tooling/validate.mjs",
+    "dry-run": "node scripts/tooling/dry-run.mjs",
+    "export": "node scripts/tooling/export.mjs",
+    "manifest": "node scripts/tooling/generate-manifest.mjs",
+    "publish": "node scripts/tooling/publish.mjs",
+    "test": "npm run test:all",
+    "test:all": "npm run test:unit && npm run test:property && npm run test:dom && npm run test:migration && npm run test:integration && npm run test:smoke && npm run test:security",
+    "test:unit": "node --test \"test/unit/*.test.js\"",
+    "test:property": "node --test \"test/property/*.test.js\"",
+    "test:dom": "node --test test/dom/basic-ui-capacity.test.js && node --test test/dom/basic-ui-characteristics.test.js && node --test test/dom/basic-ui-partial-confirmation.test.js && node --test test/dom/basic-ui-storage-retry.test.js && node --test test/dom/public-catalog.test.js",
+    "test:migration": "node --test \"test/migration/*.test.js\"",
+    "test:integration": "node --test \"test/integration/*.test.js\"",
+    "test:smoke": "node --test \"test/smoke/*.test.js\"",
+    "test:security": "node --test \"test/security/*.test.js\"",
+    "infra:synth": "node infra/cdk/app.mjs",
+    "infra:test": "node --test test/smoke/cdk-infrastructure.test.js"
+  },
+  "devDependencies": {
+    "aws-cdk-lib": "2.267.0",
+    "constructs": "10.8.1",
+    "fast-check": "4.3.0",
+    "jsdom": "26.1.0"
+  }
+}

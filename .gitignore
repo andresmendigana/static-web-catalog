@@ -32,6 +32,5 @@ Thumbs.db
 .aws/
 aws-exports.js
 
-# Build artifacts (Stage 3+)
-dist/
-build/
+# CDK synthesis artifacts
+cdk.out/

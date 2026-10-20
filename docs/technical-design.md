@@ -2,7 +2,7 @@
 
 ## Resumen ejecutivo
 
-StaticWebCatalog es un editor de catálogo de productos que evoluciona en tres etapas: un prototipo local para validar la interfaz, una publicación estática con S3 para hacerlo visible, y una arquitectura serverless completa para producción multiusuario. Este documento explica las decisiones técnicas de cada etapa, las alternativas consideradas, y las razones detrás de cada elección.
+StaticWebCatalog es un editor de catálogo de productos que evoluciona en cuatro etapas: un prototipo local para validar la interfaz, una publicación estática con S3 para hacerlo visible, una arquitectura serverless completa para producción multiusuario y una etapa posterior de comercio electrónico. Este documento explica las decisiones técnicas de cada etapa, las alternativas consideradas, y las razones detrás de cada elección.
 
 ---
 
@@ -95,9 +95,13 @@ La confirmación es parcial: solo las filas resueltas se agregan al catálogo; l
 
 ## Etapa 2: Publicación estática con S3
 
-### Objetivo
+### Objetivo y frontera
 
-Hacer el catálogo visible para terceros. El autor sigue editando localmente, pero puede exportar un `catalog.json` y las imágenes a un bucket S3 público. El visitante lee desde CloudFront.
+Stage 2 hace visible para terceros el catálogo de un solo vendedor sin convertirlo en un backend. La autoría continúa siendo local: el navegador del autor mantiene los registros en `localStorage`, genera un paquete exportable y el publicador externo lo transforma en una publicación versionada. El visitante solo lee HTML, JavaScript, CSS, `manifest.json` e imágenes; no existen controles de edición ni APIs de escritura en el sitio publicado.
+
+El límite contractual de Stage 2 es de **100 productos**. La capacidad se define una sola vez en el dominio y se valida en el repositorio, la exportación, el manifiesto y el preflight del publicador. Un lote de 101 productos falla antes de resolver un cliente autorizado o ejecutar cualquier `PutObject`; el release anterior y su puntero permanecen vigentes. Esta ampliación reemplaza el límite de 10 productos de Stage 1 únicamente para el modelo Stage 2; Stage 1 sigue documentado como prototipo local.
+
+Stage 2 queda deliberadamente fuera de alcance para autenticación de vendedores, Lambda, API Gateway, DynamoDB u otra base de datos, sincronización en tiempo real, pagos, inventario y pedidos. Esas capacidades pertenecen a Stage 3 y Stage 4, que permanecen como etapas futuras en este documento.
 
 ### Arquitectura
 
@@ -106,124 +110,229 @@ Hacer el catálogo visible para terceros. El autor sigue editando localmente, pe
         │                                 │
         ▼                                 ▼
    Editor en el         ┌──────────────────────────┐
-   navegador            │      CloudFront          │
-        │               │                          │
-        ▼               │  cachea catalog.json     │
-   Exportar             │  sirve images/<id>.jpg   │
-   (script o UI)        │                          │
-        │               └───────────┬──────────────┘
-        ▼                           │
-   ┌─────────────────────────────────▼──────────────┐
-   │                 S3 bucket                       │
-   │                                                 │
-   │   catalog.json    images/<id>.jpg              │
-   │   (lectura pública vía OAC)                    │
-   └─────────────────────────────────────────────────┘
+   navegador            │   CloudFront + OAC        │
+        │               │  lee current.json        │
+        ▼               │  sirve releases/<id>/*  │
+   ExportPackage       └───────────┬──────────────┘
+        │                          │ GET
+        ▼                          ▼
+   Publicador Node-only      ┌───────────────────────┐
+   (perfil/rol autorizado)   │ S3 privado             │
+        │                     │ releases/<id>/*       │
+        └────────────────────▶│ releases/current.json │
+                              │ lectura exclusiva OAC │
+                              └───────────────────────┘
 `
 
-La escritura sigue siendo local. La publicación es un acto deliberado del autor: exporta y sube.
+La aplicación de autoría no sube a S3. El publicador se ejecuta fuera del bundle del navegador con Node.js y recibe autorización del perfil AWS, rol de CI o proveedor de credenciales temporales del entorno de ejecución. Ni la aplicación web, ni `ExportPackage`, ni el paquete público contienen claves, tokens, roles o permisos de escritura AWS. El modo `s3-public-prototype` es una excepción aislada para demostraciones y no es una configuración de producción.
 
-### Pregunta abierta: mecanismo de publicación
+### Modelo Stage 2 y características
 
-| Opción                      | Descripción                                    | Trade-off                           |
-|-----------------------------|------------------------------------------------|-------------------------------------|
-| **Exportar + subir manual** | El editor genera un zip, el autor lo sube      | Sin credenciales expuestas, más pasos |
-| **CLI de publicación**      | Script local que sube con AWS CLI              | Requiere configuración de creds     |
-| **Subida desde el browser** | El editor sube directo con Cognito Identity    | Anticipa la Etapa 3                 |
+El `ProductRecord` conserva la identidad y los datos de Stage 1, y añade una lista ordenada opcional de características:
 
-La Etapa 2 puede quedar en "exportar + subir manual" sin perder el objetivo de visibilidad.
+```js
+ProductRecord {
+  id:             UUID,
+  name:           string,                 // no vacío, se recorta al confirmar
+  priceMode:      'amount' | 'inquire',
+  priceCOP:       integer >= 0 | null,
+  image:          string,                 // JPEG procesado en data URI durante autoría
+  createdAt:      number | ISO-8601,      // epoch ms local; fecha válida en contratos
+  characteristics: Array<{
+    label: string,                        // 1–40 caracteres después de recortar
+    value: string                         // 1–120 caracteres después de recortar
+  }>                                     // 0–12 pares, orden estable
+}
+```
+
+`characteristics` es una lista, no un mapa: conserva el orden de presentación y permite etiquetas repetidas. Cada par se normaliza sin mutar la entrada; se recortan `label` y `value`, se rechazan cadenas vacías y se rechazan listas de más de 12 elementos. Los límites son parte del contrato v1 y deben provenir de las constantes compartidas, no de una validación exclusiva de la UI.
+
+La invariante de precio es bidireccional: `priceMode: 'amount'` exige un entero COP no negativo y `priceMode: 'inquire'` exige `priceCOP: null`. No se publica una combinación ambigua. La exportación y el manifiesto conservan `priceMode`, `priceCOP`, el orden de `characteristics`, `id`, `name` y `createdAt`.
+
+### Compatibilidad con Stage 1
+
+Los registros válidos de Stage 1 se convierten de manera **no destructiva** al modelo Stage 2. El conversor conserva exactamente `id`, `name`, `priceMode`, `priceCOP`, `image` y `createdAt`, y agrega `characteristics: []` cuando el campo no existe. Cada registro convertido recibe su propia lista vacía; la conversión no modifica, borra ni reescribe el objeto fuente ni el valor original de `localStorage`.
+
+Durante la lectura/exportación, los registros malformados se reportan con su posición o identificador y se excluyen del lote; no se inventan nombre, precio o imagen. Los registros válidos siguen disponibles en modo local y una publicación solo se inicia después de una validación explícita del lote completo.
+
+### Contratos de exportación y manifiesto
+
+`ExportPackage` es la entrada portable al publicador, no una base de datos pública. La versión actual es `stage2-export-v1`:
+
+```js
+ExportPackage {
+  schemaVersion: 'stage2-export-v1',
+  generatedAt: ISO-8601 UTC datetime,
+  products: ProductRecord[],             // máximo 100, orden createdAt descendente
+  images: Array<{
+    productId: UUID,
+    contentType: 'image/jpeg',
+    data: string                          // JPEG procesado como data URI
+  }>
+}
+```
+
+Cada producto debe tener exactamente una imagen procesada asociada por `productId`; nombres duplicados no son un problema porque la identidad estable es el UUID. El paquete no incluye credenciales, tokens, roles, permisos ni configuración secreta. `generatedAt` identifica el momento de preparación del paquete y se serializa como fecha UTC ISO-8601.
+
+`PublicManifest` es el contrato público autocontenido y versionado, `stage2-manifest-v1`:
+
+```js
+PublicManifest {
+  schemaVersion: 'stage2-manifest-v1',
+  generatedAt: ISO-8601 UTC datetime,
+  catalogLimit: 100,
+  products: Array<{
+    id: UUID,
+    name: string,
+    priceMode: 'amount' | 'inquire',
+    priceCOP: integer >= 0 | null,
+    createdAt: number | ISO-8601,
+    characteristics: Array<{ label: string, value: string }>,
+    image: { key: string, contentType: 'image/jpeg' }
+  }>
+}
+```
+
+El generador ordena por `createdAt` descendente y usa el índice original como desempate estable. `serializeManifest` produce JSON UTF-8; `parseManifest` decodifica y valida el esquema antes de entregarlo al renderer. Una versión desconocida, un precio inválido, una característica fuera de límites, una fecha no válida, una referencia de imagen insegura o una capacidad superior a 100 rechaza la operación.
+
+La función de clave de imagen acepta únicamente `releaseId` y UUID de producto controlados y usa el formato fijo `.jpg`/`image/jpeg`:
+
+```text
+releases/<release-id>/images/<product-uuid>.jpg
+```
+
+No usa `name`, `label`, `value` ni ningún texto controlado por el usuario como componente de ruta. La clave debe permanecer dentro del prefijo del release, ser determinista y ser única para IDs distintos.
+
+Las pruebas property-based comparan valores contractuales, no prototipos de objetos. Para evitar diferencias de prototipos entre objetos deserializados, value objects y fixtures, se decidió usar `toPlainData` únicamente en las aserciones: recorre recursivamente arrays y objetos y los convierte en datos planos antes de `deepEqual`. No es una normalización de producción ni relaja la validación; las invariantes se validan por separado.
+
+### Layout de objetos y caché
+
+Cada release se escribe bajo un prefijo nuevo e inmutable:
+
+```text
+releases/<release-id>/index.html
+releases/<release-id>/assets/...
+releases/<release-id>/manifest.json
+releases/<release-id>/images/<product-uuid>.jpg
+releases/current.json
+```
+
+Los artefactos de `releases/<release-id>/` nunca se sobrescriben. `releases/current.json` es el único objeto mutable y contiene solamente el `releaseId` y la ruta del manifiesto completo, por ejemplo `{ "releaseId": "...", "manifest": "releases/<release-id>/manifest.json" }`. El renderer resuelve la publicación actual mediante ese puntero o usa el manifiesto del release cuando la aplicación ya está servida dentro de un prefijo versionado.
+
+- Manifiesto y assets versionados: `Cache-Control: public, max-age=31536000, immutable`.
+- Puntero `releases/current.json`: `Cache-Control: no-cache, max-age=0, must-revalidate`.
+- `Content-Type`: `application/json` para manifiesto/puntero, `image/jpeg` para imágenes y el tipo correspondiente para HTML, JavaScript, CSS y demás assets.
+
+### Flujo de publicación, validación y rollback
+
+El flujo canónico es **preflight → upload → verificación → pointer**:
+
+1. **Preflight:** valida `ExportPackage`, esquema, UUID, fechas, precio, características, imágenes, capacidad, claves, colisiones y ausencia de campos secretos; genera `PublicManifest` y arma el paquete autocontenido. Un error produce cero escrituras.
+2. **Upload:** comprueba que el prefijo `releases/<release-id>/` no tenga artefactos y sube primero `index.html`, assets, manifiesto e imágenes con `If-None-Match: *` y caché larga.
+3. **Verificación:** lee o inspecciona cada objeto subido y confirma existencia, bytes, `Content-Type`, `Cache-Control`, manifiesto válido y correspondencia uno-a-uno entre sus referencias de imagen y los objetos del release. El `current.json` aún no cambia.
+4. **Pointer:** solo después de una verificación completa escribe `releases/current.json` como última operación. Si falla validación, red, autorización, cuota, upload o verificación, el puntero anterior queda vigente; un prefijo incompleto nunca se anuncia como actual.
+
+El rollback no reescribe ni elimina un prefijo inmutable. El publicador recibe un `releaseId` anterior, verifica que existan y sean válidos su `manifest.json`, `index.html` y todas las imágenes referenciadas, y solo entonces repunta `releases/current.json` a esa release completa. Si la verificación o la escritura del puntero falla, conserva el puntero que ya estaba vigente.
+
+### Configuración S3 + CloudFront/OAC
+
+La configuración recomendada mantiene S3 privado y usa CloudFront como único punto público:
+
+- Activar `BucketOwnerEnforced` y las cuatro opciones de bloqueo de acceso público.
+- Usar el endpoint REST regional de S3 como origen, no el endpoint de sitio S3.
+- Configurar CloudFront Origin Access Control con `SigningBehavior=always`, `SigningProtocol=sigv4`.
+- Permitir únicamente `s3:GetObject` al principal `cloudfront.amazonaws.com` cuando `AWS:SourceArn` coincide con la distribución autorizada. No conceder `Principal: "*"`, `s3:PutObject` ni `s3:ListBucket` en la policy de lectura del origen.
+- Mantener HTTPS y caché corta para el puntero, larga e inmutable para releases.
+- Resolver la autorización de escritura mediante `AWS_PROFILE`, un rol de CI con identidad federada o credenciales temporales administradas fuera del repositorio. Los parámetros de bucket, región, prefijo, modo y distribución son configuración de destino, no secretos para el navegador.
+
+`PUBLICATION_MODE=s3-public-prototype` solo se permite para una demostración temporal en un bucket separado, sin datos sensibles y sin escritura anónima. No debe mezclarse con la policy privada/OAC ni presentarse como configuración productiva. La configuración parametrizada y las plantillas se mantienen en [`docs/s3-cloudfront-oac.md`](s3-cloudfront-oac.md) y [`infra/s3-cloudfront-oac/`](../infra/s3-cloudfront-oac/).
+
+La referencia visual reproducible de Stage 2 está en [`diagrams/README.md`](../diagrams/README.md), con vistas de solución, datos, integración, seguridad y la [vista consolidada](../diagrams/stage2-publication-architecture.md), disponible también como [PNG](../diagrams/stage2-publication-architecture.png). El [generador Python](../diagrams/stage2-publication-architecture.py) y la [fuente editable draw.io](../diagrams/stage2-publication-architecture.drawio) permiten reproducirla sin AWS, red ni rutas locales.
 ---
 
 ## Etapa 3: Arquitectura serverless
 
 ### Objetivo
 
-Producción completa: el autor edita directamente contra la nube, la autenticación protege la escritura, y la infraestructura escala sin mantenimiento de servidores.
+Producción completa: el autor edita directamente contra la nube, la autenticación protege la escritura, y la infraestructura escala sin mantenimiento de servidores. La fuente de verdad es DynamoDB; las imágenes se transfieren directamente a S3 mediante URLs prefirmadas; la publicación pública continúa siendo una proyección inmutable compatible con Stage 2.
 
-### Arquitectura
+### Artefactos visuales reproducibles
 
-`
-         AUTOR (autenticado)              VISITANTE (anónimo)
-               │                                  │
-               ▼                                  ▼
-      ┌─────────────────┐              ┌────────────────────┐
-      │    Cognito      │              │                    │
-      │  (hosted UI)    │              │    CloudFront      │
-      └────────┬────────┘              │                    │
-               │ JWT                   │  cachea catalog.json│
-               ▼                       │  sirve images/      │
-      ┌─────────────────┐              │                    │
-      │  API Gateway    │              └─────┬──────────┬───┘
-      │  (HTTP API)     │                    │          │
-      └────────┬────────┘                    ▼          ▼
-               │                       ┌──────────────────────┐
-               ▼                       │   S3 (lectura pública│
-      ┌─────────────────┐  escribe     │       vía OAC)       │
-      │     Lambda      │─────────────▶│                      │
-      └────────┬────────┘              │  catalog.json        │
-               │                       │  images/<id>.jpg     │
-               ▼                       │  originals/<id>.jpg  │
-      ┌─────────────────┐              └──────────────────────┘
-      │    DynamoDB     │
-      │ (fuente verdad) │─────────────▶ regenera catalog.json
-      └─────────────────┘                al escribir
-`
+Las vistas vigentes de Stage 3 están centralizadas en [`diagrams/README.md`](../diagrams/README.md) y en la [vista consolidada serverless](../diagrams/stage3-serverless-architecture.md). El conjunto cubre infraestructura, aplicación, datos y seguridad:
+
+- Infraestructura: [PNG](../diagrams/stage3-infrastructure.png) · [SVG](../diagrams/stage3-infrastructure.svg)
+- Aplicación: [PNG](../diagrams/stage3-application.png) · [SVG](../diagrams/stage3-application.svg)
+- Datos: [PNG](../diagrams/stage3-data.png) · [SVG](../diagrams/stage3-data.svg)
+- Seguridad: [PNG](../diagrams/stage3-security.png) · [SVG](../diagrams/stage3-security.svg)
+- Vista consolidada (cuatro perspectivas): [PNG](../diagrams/stage3-serverless-architecture.png) · [SVG](../diagrams/stage3-serverless-architecture.svg)
+- [Fuente editable multi-página draw.io](../diagrams/stage3-serverless-architecture.drawio)
+- [Generador Python reproducible](../diagrams/stage3-serverless-architecture.py)
+
+Desde la raíz del repositorio se regeneran las diez salidas (cuatro pares por vista y un par consolidado) con:
+
+```bash
+python diagrams/stage3-serverless-architecture.py
+```
+
+La reproducción es local y offline: no necesita AWS, red, credenciales, perfiles, rutas absolutas ni acceso al renderer Stage 2. El generador obtiene el directorio de salida desde su propia ubicación y usa únicamente el ejecutable local Graphviz `dot`; si `dot` no está instalado, las fuentes Markdown/Mermaid, Python y draw.io permanecen disponibles para edición. Los archivos generados y sus fuentes no contienen secretos ni valores dependientes de una cuenta o máquina.
+
+Estas vistas son la referencia visual de la arquitectura actual. El esquema conceptual que sigue conserva el contexto histórico de la evolución, pero los contratos vigentes son `stage2-manifest-v1`, `releases/current.json`, buckets privados con CloudFront/OAC, SQS Standard con DLQ y publicación asíncrona con puntero tardío. El renderer público sigue siendo read-only y no requiere Cognito, API de escritura ni DynamoDB.
+
+### Arquitectura vigente
+
+La vista completa y sus cuatro perspectivas están en [los artefactos Stage 3](../diagrams/stage3-serverless-architecture.md). Este resumen muestra la separación de lectura y escritura sin duplicar el detalle visual:
+
+```text
+Autor SPA -- Cognito PKCE/JWT --> API Gateway --> Lambdas --> DynamoDB
+   |                                  |             |
+   | PUT directo con URL prefirmada   |             +--> SQS Standard --> proyección
+   v                                  v                                      |
+S3 uploads privado                 confirmación                         S3 releases
+                                                                              |
+Visitante anónimo -- HTTPS GET --> CloudFront/OAC --> releases/current.json
+```
+
+Los buckets son privados. El visitante solo consume la aplicación estática, `releases/current.json`, `stage2-manifest-v1` y sus imágenes mediante CloudFront/OAC; nunca obtiene listado, escritura o borrado del origen. La SPA de autoría usa rutas autenticadas y no forma parte del bundle read-only.
 
 ### Separación de lectura y escritura
 
-Un catálogo se lee mucho más de lo que se escribe. Por eso el camino de lectura no pasa por cómputo:
+La mutación confirmada marca la proyección como pendiente y encola una publicación; el proyector genera `stage2-manifest-v1` bajo un release inmutable y actualiza `releases/current.json` únicamente después de verificar todos los artefactos. El visitante conserva el release completo anterior si la publicación falla.
 
-| Ruta      | Componentes                         | Costo por visita       |
-|-----------|-------------------------------------|------------------------|
-| Escritura | Cognito → API GW → Lambda → DynamoDB | Pago por request       |
-| Lectura   | CloudFront → S3                      | Prácticamente cero     |
-
-Cada escritura regenera `catalog.json` e invalida la caché de CloudFront. El visitante siempre ve la versión más reciente, sin cold starts ni costos de cómputo.
+La sincronización usa SQS Standard con DLQ, reintentos acotados e idempotencia por versión lógica. No se necesita orden global ni entrega exactamente una vez: las condiciones de versión y el puntero tardío protegen frente a duplicados y mensajes atrasados.
 
 ### URLs prefirmadas para imágenes
 
 Los bytes de las imágenes no pasan por Lambda:
 
-`
-   1. POST /uploads          → Lambda genera URL prefirmada + key
-   2. PUT directo a S3       ← El navegador sube, Lambda no ve los bytes
-   3. POST /products         → {key, name, priceMode, priceCOP}
-                               Lambda escribe DynamoDB y regenera catalog.json
-`
+```text
+1. POST /uploads/prepare → Lambda crea UploadSession y URL prefirmada.
+2. PUT directo a S3     ← El navegador sube; Lambda no recibe los bytes.
+3. POST /uploads/{id}/complete → Lambda valida HeadObject y asocia la referencia.
+```
 
-Esto evita el límite de 6 MB de payload de Lambda y el costo de cómputo por mover bytes.
+Las claves se construyen con identificadores controlados, no con nombres o textos del usuario. La URL, el checksum y los datos sensibles de la solicitud no se registran.
 
 ### Autenticación con Cognito
 
-El endpoint de escritura no puede quedar abierto: cualquiera podría reemplazar el catálogo. Cognito con hosted UI evita construir pantallas de login:
+Cognito entrega la identidad de la SPA mediante Authorization Code + PKCE. El JWT authorizer de API Gateway valida issuer, audience y scopes antes de invocar Lambda. La sesión maneja expiración, refresh y logout según la configuración del entorno; no existe Cognito Identity Pool ni se entregan credenciales AWS al navegador.
 
-- Un solo pool de usuarios.
-- Login con email/contraseña o proveedores sociales.
-- El frontend recibe un JWT que envía en el header `Authorization`.
-- API Gateway valida el token antes de llegar a Lambda.
+### Fuente de verdad y contrato público
 
-### Fuente de verdad: DynamoDB
+DynamoDB guarda el estado completo del catálogo. `stage2-manifest-v1` es una proyección allowlist derivada que se publica de forma asíncrona por release. Esto permite:
 
-DynamoDB guarda el estado completo del catálogo. `catalog.json` es contenido derivado que se regenera con cada escritura. Esto permite:
+- Escrituras condicionales por producto y propietario.
+- Consultas owner-scoped con orden determinista por `createdAt + id`.
+- Escalar a múltiples autores sin exponer datos cross-owner.
 
-- Escrituras atómicas por producto.
-- Consultas por `createdAt` sin reconstruir nada.
-- Escalar a múltiples autores sin conflictos.
+La proyección conserva `id`, `name`, `priceMode`, `priceCOP`, `createdAt`, `characteristics` e imagen, y omite `ownerId`, versión, auditoría, claims, estado de carga y claves internas. El renderer Stage 2 sigue sin Cognito, API de escritura o DynamoDB y muestra su estado de error sin tarjetas parciales ante un manifiesto inválido.
 
-A este volumen de productos, DynamoDB entra en la capa gratuita.
+### Imágenes y retención
 
-### Preservación del original
-
-A diferencia del prototipo, la Etapa 3 guarda dos versiones de cada imagen:
-
-- `images/<id>.jpg`: imagen escalada a 800px para el catálogo.
-- `originals/<id>.jpg`: archivo original para futuros usos (zoom, descarga, reescaldos).
-
-El escalado en canvas sigue sirviendo para reducir los bytes de subida.
+S3 separa los objetos temporales de uploads de los objetos de releases. Las sesiones pendientes tienen expiración y lifecycle; las imágenes asociadas a productos o referenciadas por releases no se eliminan durante la limpieza de temporales. El versioning de S3 y la retención configurada apoyan la recuperación de objetos, mientras que el rollback de `current.json` solo cambia el puntero público.
 
 ### Infraestructura como código
 
-CDK o SAM. CDK maneja mejor CloudFront con OAC; SAM es más liviano para API y Lambda. Dado que el frontend es JS vanilla sin build, CDK introduce una toolchain de Node que hoy no existe. La elección concreta se definirá al iniciar la Etapa 3.
+CDK es la IaC elegida para Stage 3. Separa stacks stateful y stateless, recibe región, dominios, límites, retención y RPO/RTO por configuración, y sintetiza sin credenciales, red ni lookups vivos. Las verificaciones incluyen snapshots/assertions, logical IDs, Aspects, cfn-lint y cfn-guard; cdk-nag no forma parte de este cambio.
 ---
 
 ## Decisiones que sobreviven entre etapas

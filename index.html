@@ -12,13 +12,13 @@
 <body>
     <div class="background-overlay" id="background-overlay"></div>
     
-    <div class="prototype-banner">
-        ⚠️ Este es un prototipo. Los datos se guardan solo en este navegador y son de prueba.
+    <div class="prototype-banner" id="local-authoring-notice" data-mode="local-authoring" role="status" aria-live="polite">
+        Modo de autoría local: los datos se guardan solo en este navegador y este catálogo no es público hasta que se publique.
     </div>
 
     <header class="header">
         <h1>Editor de Catálogo</h1>
-        <div class="product-count" id="product-count">0 de 10 productos</div>
+        <div class="product-count" id="product-count" aria-label="0 de 100 productos">0/100 productos</div>
     </header>
 
     <main class="main">
@@ -31,17 +31,27 @@
         <section class="staging-section">
             <h2>Agregar productos</h2>
             
-            <!-- Input oculto y botón personalizado -->
-            <div class="file-input-container">
-                <input type="file" id="file-input" accept="image/*" multiple>
-                <button type="button" class="file-input-button" id="file-button">
-                    <svg viewBox="0 0 24 24">
+            <!-- Inputs ocultos -->
+            <input type="file" id="file-input-manual" accept="image/*" multiple style="display:none;">
+            <input type="file" id="file-input-dummyjson" accept="*" multiple style="display:none;">
+            
+            <!-- Dos modos de carga -->
+            <div class="image-mode-selector" style="display: flex; gap: 12px; margin-bottom: 16px;">
+                <button type="button" class="file-input-button btn-mode-manual" id="file-button-manual" style="flex: 1;">
+                    <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; margin-right: 8px;">
                         <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
                     </svg>
-                    Seleccionar imágenes de productos
+                    📸 Mis fotos
+                </button>
+                <button type="button" class="file-input-button btn-mode-dummyjson" id="file-button-dummyjson" style="flex: 1;">
+                    <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; margin-right: 8px;">
+                        <path d="M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M7,12.5C6.17,12.5 5.5,11.83 5.5,11C5.5,10.17 6.17,9.5 7,9.5C7.83,9.5 8.5,10.17 8.5,11C8.5,11.83 7.83,12.5 7,12.5M12,12.5C11.17,12.5 10.5,11.83 10.5,11C10.5,10.17 11.17,9.5 12,9.5C12.83,9.5 13.5,10.17 13.5,11C13.5,11.83 12.83,12.5 12,12.5M17,12.5C16.17,12.5 15.5,11.83 15.5,11C15.5,10.17 16.17,9.5 17,9.5C17.83,9.5 18.5,10.17 18.5,11C18.5,11.83 17.83,12.5 17,12.5Z"/>
+                    </svg>
+                    🎲 Aleatorias
                 </button>
             </div>
             
+            <div id="capacity-status" class="capacity-status" role="status" aria-live="polite"></div>
             <div id="staging-area" style="margin-top: 16px;"></div>
             <button id="add-button" class="btn btn-primary" disabled>Agregar al catálogo</button>
         </section>
@@ -59,3 +69,4 @@
     <script type="module" src="src/main.js"></script>
 </body>
 </html>
+
