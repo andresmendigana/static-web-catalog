@@ -112,3 +112,36 @@
     backdrop-filter: blur(10px);
     border-bottom: 1px solid rgba(224, 224, 224, 0.8);
 }
+
+/* WhatsApp button for product cards */
+.whatsapp-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background-color: #25D366;
+    color: white;
+    border: none;
+    border-radius: var(--border-radius);
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    text-decoration: none;
+    transition: background-color 0.2s ease;
+    font-weight: 500;
+    width: 100%;
+    justify-content: center;
+}
+
+.whatsapp-button:hover {
+    background-color: #128C7E;
+}
+
+.whatsapp-button:active {
+    background-color: #075E54;
+}
+
+.whatsapp-button svg {
+    width: 18px;
+    height: 18px;
+}

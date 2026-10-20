@@ -360,6 +360,28 @@ function createProductCard(product, documentObject, imageBaseUrl) {
     : formatPriceCOP(product.priceCOP);
   info.append(price);
 
+  // WhatsApp button
+  const whatsappButton = documentObject.createElement('a');
+  whatsappButton.className = 'whatsapp-button';
+  whatsappButton.textContent = '💬 Consultar por este producto';
+  whatsappButton.target = '_blank';
+  whatsappButton.rel = 'noopener noreferrer';
+  whatsappButton.href = '#';
+  whatsappButton.addEventListener('click', (e) => {
+    e.preventDefault();
+    const priceText = product.priceMode === 'inquire' ? null : formatPriceCOP(product.priceCOP);
+    const pricePart = priceText ? '\n\nPrecio: ' + priceText : '';
+    let characteristicsPart = '';
+    if (product.characteristics && product.characteristics.length > 0) {
+      characteristicsPart = '\n\nCaracterísticas:' + product.characteristics.map(c => '\n- ' + c.label + ': ' + c.value).join('');
+    }
+    const message = 'Hola, estoy interesado en el producto: ' + product.name + pricePart + characteristicsPart + '\n\n¿Podrían darme más información?';
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = 'https://wa.me/573142720955?text=' + encodedMessage;
+    window.open(whatsappUrl, '_blank');
+  });
+  info.append(whatsappButton);
+
   card.append(imageContainer, info);
   return card;
 }
